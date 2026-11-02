@@ -7,14 +7,14 @@ ZIP 안의 문서·사진을 **내 PC에서 읽고 OCR 결과를 정리하는** 
 ## 다른 PC에서 처음 설치
 
 1. [Node.js 공식 다운로드](https://nodejs.org/en/download)에서 **Node.js 24 LTS**의 Windows 설치 프로그램을 설치합니다. npm은 함께 설치됩니다. 현재 검증 환경은 Windows x64 + Node.js 24입니다.
-2. GitHub에 권한이 있는 계정으로 로그인하고 이 저장소의 **Code → Download ZIP**을 누릅니다. 압축을 완전히 풀어 `C:\tools\document-organizer` 같은 폴더에 둡니다. ZIP 안에서 바로 실행하지 마세요.
+2. 이 저장소의 **Code → Download ZIP**을 누릅니다. 공개 저장소라 GitHub 로그인 없이 받을 수 있습니다. 압축을 완전히 풀어 `C:\tools\document-organizer` 같은 폴더에 둡니다. ZIP 안에서 바로 실행하지 마세요.
 3. 그 폴더의 **`setup.cmd`를 한 번 실행**합니다. 필요한 프로그램과 공개 OCR 모델을 설치합니다. 처음 설치할 때는 인터넷 연결이 필요하며, API 키는 입력하지 않습니다.
 4. 설치 완료가 표시되면 **`start.cmd`를 실행**합니다. 열린 실행 창을 유지하세요.
 5. Chrome에서 **http://127.0.0.1:4178** 로 접속해 ZIP이나 문서를 넣습니다.
 
 이후에는 `start.cmd`만 실행하면 됩니다. 각 PC에서 독립적으로 실행하므로 같은 주소를 사용해도 서로 연결되지 않습니다.
 
-Git을 사용하는 경우에는 ZIP 다운로드 대신 다음 명령으로 받아도 됩니다. 비공개 저장소이므로 GitHub 인증이 필요합니다.
+Git을 사용하는 경우에는 ZIP 다운로드 대신 다음 명령으로 받아도 됩니다. 공개 저장소라 다운로드에 GitHub 인증이 필요하지 않습니다.
 
 ```powershell
 git clone https://github.com/simdorei/document-organizer.git
