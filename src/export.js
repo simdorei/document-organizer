@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { mergeParts } from './analysis.js';
+import { ocrReview } from './normalize.js';
 
 export async function exportWorkbook(job, store) {
   const book = new ExcelJS.Workbook();
@@ -14,7 +15,7 @@ export async function exportWorkbook(job, store) {
   };
   const files = sheet('파일목록', [['파일', 45], ['읽기 상태', 18], ['분석 상태', 18], ['문서 종류', 24], ['AI 요약·검토 전', 70], ['오류·주의', 70]]);
   const facts = sheet('핵심항목', [['파일', 45], ['분류', 15], ['항목', 25], ['원문 값', 40], ['위치', 24], ['근거 번호', 14], ['원문 인용', 80], ['사람 확인 필요', 25]]);
-  const notes = sheet('확인할사항', [['파일', 45], ['확인할 사항', 100]]);
+  const notes = sheet('확인할사항', [['파일', 45], ['확인할 사항', 60], ['위치', 40], ['확인할 OCR 글줄', 70], ['OCR 점수 (0~1)', 20], ['본문 포함 여부', 25]]);
   const sources = sheet('추출원문', [['파일', 45], ['근거 번호', 14], ['위치', 25], ['추출된 글·OCR 오류 가능', 110]]);
   const statuses = { ready: '읽기 완료', review: '확인 필요', failed: '실패', unsupported: '지원 안 함', pending: '대기',
     reading: '읽는 중', running: '분석 중', complete: '분석 완료' };
@@ -28,6 +29,7 @@ export async function exportWorkbook(job, store) {
     }
   };
   row(notes, ['', 'AI 정리 결과입니다. 원본과 대조해 주세요. 세액·비과세·필요경비 인정 여부를 판정하지 않습니다.']);
+  row(notes, ['', 'OCR 점수는 글자 인식 엔진의 판단값이며 정답 확률이 아닙니다. 낮은 점수(0.80 미만), 점수 없음, 본문에서 제외된 글줄을 표시합니다. 표시가 없어도 정확성을 보장하지 않습니다.']);
   if (job.error) row(notes, ['', job.error]);
   for (const file of job.files) {
     const parsed = await store.readResult(job, file, 'parsed');
@@ -39,6 +41,8 @@ export async function exportWorkbook(job, store) {
     for (const fact of result?.facts || []) row(facts, [file.name, fact.category, fact.label, fact.value, fact.location, fact.sourceId, fact.quote, '미검토']);
     for (const note of result?.reviewNotes || []) row(notes, [file.name, note]);
     for (const warning of file.warnings) row(notes, [file.name, warning.message]);
+    for (const item of ocrReview(parsed)) row(notes, [file.name, item.reason, `${item.location} · OCR 글줄 ${item.line}`, item.text,
+      item.confidence === null ? '점수 없음' : item.confidence.toFixed(3), item.dropped ? '제외됨' : '포함됨']);
     for (const source of parsed?.sources || []) row(sources, [file.name, source.id, source.label, source.text]);
   }
   return book.xlsx.writeBuffer();

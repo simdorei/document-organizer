@@ -11,6 +11,7 @@ import { copyLimited } from './archive.js';
 import { outgoing, batches, mergeParts } from './analysis.js';
 import { exportWorkbook } from './export.js';
 import { modelStatus } from './models.js';
+import { ocrReview } from './normalize.js';
 
 export async function buildApp({ store = new JobStore(), runner, clientFactory, checkModels = modelStatus, apiKey = process.env.ANTHROPIC_API_KEY || '' } = {}) {
   await store.init();
@@ -88,7 +89,9 @@ export async function buildApp({ store = new JobStore(), runner, clientFactory, 
   app.get('/api/jobs/:id/files/:fileId', async request => {
     const { job, file } = store.file(request.params.id, request.params.fileId);
     const checkpoint = await store.readResult(job, file, 'analysis');
-    return { file, parsed: ['ready', 'review'].includes(file.readStatus) ? await store.readResult(job, file, 'parsed') : null, analysis: checkpoint ? mergeParts(checkpoint) : null };
+    const parsed = ['ready', 'review'].includes(file.readStatus) ? await store.readResult(job, file, 'parsed') : null;
+    if (parsed) parsed.ocrReview = ocrReview(parsed);
+    return { file, parsed, analysis: checkpoint ? mergeParts(checkpoint) : null };
   });
   app.get('/api/jobs/:id/files/:fileId/outgoing', async request => {
     const { job, file } = store.file(request.params.id, request.params.fileId);

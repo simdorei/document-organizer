@@ -7,6 +7,7 @@ import { temporary, zip, multipartBody } from './helpers.js';
 import { JobStore } from '../src/store.js';
 import { JobRunner } from '../src/jobs.js';
 import { buildApp } from '../src/server.js';
+import { normalize } from '../src/normalize.js';
 
 async function fixture(t, options = {}) {
   const dir = await temporary(t), store = new JobStore(dir);
@@ -103,4 +104,58 @@ test('a partially enumerated ZIP remains marked incomplete after rereading a val
   assert.equal(upload.statusCode, 200); await runner.task;
   const job = store.get(upload.json().id); assert.match(job.error, /2,000/); assert.equal(job.files[0].readStatus, 'ready');
   runner.retryRead(job, job.files[0], false); await runner.task; assert.match(job.error, /2,000/);
+});
+
+test('saved OCR review details survive reload and appear in HTTP and Excel without an API key', async t => {
+  const parser = async () => normalize({ success: true, fileType: 'pdf', pageCount: 2,
+    pages: [{ pageNumber: 2, markdown: '금액 1,250,000원' }], ocrLines: [{ pageNumber: 2, lines: [
+      { text: '금액 1,250,000원', confidence: 0.62 }, { text: '=1+1', confidence: 0.2, dropped: true },
+    ] }],
+  });
+  const { app, store, runner, headers, token, dir } = await fixture(t, { parser });
+  const input = multipartBody('review.pdf', Buffer.from('synthetic PDF handled by the fixture parser'));
+  const upload = await app.inject({ method: 'POST', url: '/api/jobs', ...input, headers: { ...input.headers, ...headers } });
+  assert.equal(upload.statusCode, 200); await runner.task;
+  const job = store.get(upload.json().id), file = job.files[0]; assert.equal(file.readStatus, 'review');
+  const parsed = await store.readResult(job, file, 'parsed');
+  // Older saved results contain raw OCR pages but no derived review list or page label.
+  delete parsed.ocrReview; delete parsed.ocrPages[0].label;
+  await store.writeResult(job, file, 'parsed', parsed);
+  const reloaded = new JobStore(dir); await reloaded.init();
+  assert.equal((await reloaded.readResult(reloaded.get(job.id), file, 'parsed')).ocrPages[0].lines[1].text, '=1+1');
+  const url = `/api/jobs/${job.id}`;
+  const detail = (await app.inject({ url: `${url}/files/${file.id}`, headers })).json();
+  assert.deepEqual(detail.parsed.ocrReview.map(r => [r.location, r.line, r.text, r.confidence]), [
+    ['2쪽', 1, '금액 1,250,000원', 0.62], ['2쪽', 2, '=1+1', 0.2],
+  ]);
+  const outgoing = (await app.inject({ url: `${url}/files/${file.id}/outgoing`, headers })).json();
+  assert.ok(!JSON.stringify(outgoing).includes('=1+1'));
+  const exported = await app.inject(`${url}/export?token=${token}`); assert.equal(exported.statusCode, 200);
+  const book = new ExcelJS.Workbook(); await book.xlsx.load(exported.rawPayload);
+  assert.equal(book.worksheets.length, 4);
+  const notes = book.getWorksheet('확인할사항');
+  const rows = []; notes.eachRow(r => { if (r.getCell(4).value) rows.push(r); });
+  const kept = rows.find(r => r.getCell(4).value === '금액 1,250,000원');
+  assert.equal(kept.getCell(1).value, 'review.pdf'); assert.equal(kept.getCell(3).value, '2쪽 · OCR 글줄 1');
+  assert.equal(kept.getCell(5).value, '0.620'); assert.equal(kept.getCell(6).value, '포함됨');
+  const dropped = rows.find(r => r.getCell(4).value === '=1+1');
+  assert.equal(dropped.getCell(4).type, ExcelJS.ValueType.String); assert.equal(dropped.getCell(6).value, '제외됨');
+});
+
+test('only discarded OCR remains reviewable and cannot trigger an empty paid analysis', async t => {
+  let calls = 0;
+  const parser = async () => normalize({ success: true, fileType: 'image', markdown: '',
+    ocrLines: [{ pageNumber: 1, lines: [{ text: '불명확한 금액', confidence: 0.1, dropped: true }] }],
+  });
+  const { app, store, runner, headers } = await fixture(t, { parser, apiKey: 'sk-ant-synthetic-test-only', clientFactory: () => { calls++; } });
+  const input = multipartBody('unreadable.png', Buffer.from('synthetic image handled by the fixture parser'));
+  const upload = await app.inject({ method: 'POST', url: '/api/jobs', ...input, headers: { ...input.headers, ...headers } });
+  assert.equal(upload.statusCode, 200); await runner.task;
+  const job = store.get(upload.json().id), file = job.files[0];
+  assert.equal(file.readStatus, 'review'); assert.equal(file.sourceCount, 0);
+  const detail = (await app.inject({ url: `/api/jobs/${job.id}/files/${file.id}`, headers })).json();
+  assert.equal(detail.parsed.ocrReview[0].text, '불명확한 금액');
+  const response = await app.inject({ method: 'POST', url: `/api/jobs/${job.id}/analyze`, headers,
+    payload: { purpose: '정리', model: 'claude-sonnet-5-5', masked: true, fileIds: [file.id], consent: true } });
+  assert.equal(response.statusCode, 400); assert.equal(calls, 0); assert.equal(file.analysisStatus, 'pending');
 });

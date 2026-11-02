@@ -63,7 +63,7 @@ export class JobRunner {
       throw appError('이 작업은 이전 목적·모델·가림 설정으로만 이어서 분석할 수 있습니다. 설정을 바꾸려면 새 작업으로 올려 주세요.');
     }
     const files = job.files.filter(f => fileIds.includes(f.id) && ['ready', 'review'].includes(f.readStatus) &&
-      !['complete', 'review'].includes(f.analysisStatus));
+      f.sourceCount !== 0 && !['complete', 'review'].includes(f.analysisStatus));
     if (!files.length) throw appError('새로 분석할 파일이 없습니다. 읽기 상태와 선택한 파일을 확인해 주세요.');
     const client = clientFactory(apiKey);
     this.launch(job, async () => {

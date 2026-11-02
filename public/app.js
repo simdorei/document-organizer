@@ -16,7 +16,7 @@ const run = fn => async event => { try { await fn(event); } catch (error) { noti
 const jobUrl = () => `/api/jobs/${state.job.id}`;
 const fileUrl = () => `${jobUrl()}/files/${state.file}`;
 const originalUrl = () => `${fileUrl()}/original?token=${encodeURIComponent(state.token)}`;
-const eligible = f => ['ready', 'review'].includes(f.readStatus) && !['complete', 'review'].includes(f.analysisStatus);
+const eligible = f => ['ready', 'review'].includes(f.readStatus) && f.sourceCount !== 0 && !['complete', 'review'].includes(f.analysisStatus);
 const statusLabel = { pending: '대기', reading: '읽는 중', ready: '읽기 완료', review: '확인 필요', failed: '실패', unsupported: '지원 안 함', running: '분석 중', complete: '분석 완료' };
 function selection() {
   const n = state.job?.files.filter(f => eligible(f) && state.selected.has(f.id)).length || 0;
@@ -80,7 +80,7 @@ async function renderJob() {
     if (stamp !== state.detailStamp) { state.detailStamp = stamp; await loadDetail(); }
   } else if (job.files.length) await selectFile(job.files[0].id);
 }
-async function selectFile(id) { state.file = id; state.detailStamp = ''; await renderJob(); }
+async function selectFile(id) { state.file = id; state.originalPage = null; state.detailStamp = ''; await renderJob(); }
 async function loadDetail() {
   const selected = state.file, jobId = state.job.id;
   const result = await api(fileUrl());
@@ -90,7 +90,36 @@ async function loadDetail() {
   $('downloadOriginal').href = originalUrl() + '&download=1';
   $('fileWarnings').replaceChildren();
   for (const message of [result.file.error, result.file.analysisError, ...result.file.warnings.filter(w => w.code !== 'OCR_APPLIED').map(w => w.message)].filter(Boolean)) $('fileWarnings').append(el('div', message, 'notice'));
+  if (result.parsed?.ocrReview?.length) {
+    const button = el('button', `확인할 글줄 보기 · ${result.parsed.ocrReview.length}개`, 'review-link');
+    button.onclick = run(async () => {
+      state.tab = 'text'; await renderDetail(); document.getElementById('ocrReview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    $('fileWarnings').append(button);
+  }
   await renderDetail();
+}
+function renderOcrReview(body, parsed, file) {
+  if (!parsed?.ocrReview?.length) return;
+  const section = el('section', undefined, 'ocr-review'); section.id = 'ocrReview'; section.setAttribute('aria-labelledby', 'ocrReviewTitle');
+  const heading = el('h3', `원본 확인이 필요한 글줄 · ${parsed.ocrReview.length}개`); heading.id = 'ocrReviewTitle'; section.append(heading);
+  section.append(el('p', 'OCR 점수는 글자 인식 엔진의 판단값입니다. 정답 확률이 아니며, 표시가 없는 글도 정확성을 보장하지 않습니다. 글줄 번호는 OCR이 감지한 순서입니다.', 'small'));
+  for (const item of parsed.ocrReview) {
+    const card = el('div', undefined, 'ocr-review-item');
+    card.append(el('strong', `${item.location} · OCR 글줄 ${item.line}`),
+      el('span', item.dropped ? '본문에서 제외됨' : '본문에 포함됨 · 확인 필요', 'badge warn'),
+      el('p', `${item.reason} · OCR 점수 ${item.confidence === null ? '없음' : `${item.confidence.toFixed(3)} / 1`}`, 'small'),
+      el('pre', item.text || '(읽힌 글자 없음)'));
+    if (file.hasOriginal) {
+      const button = el('button', file.extension === '.pdf' ? '원본 페이지 보기 ↗' : '원본 확인 ↗', 'review-link');
+      button.onclick = run(async () => {
+        state.originalPage = item.page; state.tab = 'original'; await renderDetail(); $('detailBody').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      card.append(button);
+    }
+    section.append(card);
+  }
+  body.append(section);
 }
 async function renderDetail(highlight) {
   if (!state.detail) return;
@@ -98,7 +127,8 @@ async function renderDetail(highlight) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', String(button.dataset.tab === state.tab));
   const body = $('detailBody'); body.replaceChildren(); const { file, parsed, analysis } = state.detail;
   if (state.tab === 'summary') {
-    if (!analysis) body.append(el('div', file.analysisStatus === 'running' ? 'Claude가 자료를 정리하고 있습니다…' : '아직 분석하지 않았습니다. ‘추출된 글’을 먼저 확인하고 필요한 파일을 선택해 분석하세요.', 'empty'));
+    if (!analysis) body.append(el('div', file.sourceCount === 0 ? '분석할 추출 본문이 없습니다. ‘확인할 글줄 보기’에서 제외된 글줄과 원본을 대조해 주세요.' :
+      file.analysisStatus === 'running' ? 'Claude가 자료를 정리하고 있습니다…' : '아직 분석하지 않았습니다. ‘추출된 글’을 먼저 확인하고 필요한 파일을 선택해 분석하세요.', 'empty'));
     else {
       body.append(el('span', analysis.documentType, 'badge'), el('h3', analysis.title, 'section-label'));
       if (!analysis.complete) body.append(el('div', `일부 결과입니다. ${analysis.completed}/${analysis.total}구간 완료`, 'notice'));
@@ -116,7 +146,8 @@ async function renderDetail(highlight) {
     }
   } else if (state.tab === 'original') {
     if (!file.hasOriginal) body.append(el('p', '보관된 원본이 없습니다.', 'empty'));
-    else if (file.extension === '.pdf') { const frame = document.createElement('iframe'); frame.className = 'original-pdf'; frame.title = 'PDF 원본'; frame.src = originalUrl(); body.append(frame); }
+    else if (file.extension === '.pdf') { const frame = document.createElement('iframe'); frame.className = 'original-pdf'; frame.title = 'PDF 원본';
+      frame.src = originalUrl() + (Number.isInteger(state.originalPage) && state.originalPage > 0 ? `#page=${state.originalPage}` : ''); body.append(frame); }
     else if (['.png', '.jpg', '.jpeg', '.webp'].includes(file.extension)) { const image = document.createElement('img'); image.className = 'original-image'; image.alt = file.name; image.src = originalUrl(); body.append(image); }
     else body.append(el('p', '이 형식은 원본 다운로드 후 한글·Word·Excel 등으로 열어 확인해 주세요. 추출된 글은 옆 탭에서 볼 수 있습니다.', 'empty'));
   } else {
@@ -125,7 +156,10 @@ async function renderDetail(highlight) {
       const data = await api(`${fileUrl()}/outgoing?masked=${$('masked').checked}`); sources = data.sources;
       if (state.renderId !== renderId) return;
       body.append(el('div', `현재 설정으로 전송할 글입니다. 본문 기준 ${data.requests}회 요청으로 나뉩니다. 정리 목적도 함께 전송합니다. 가림 설정은 ‘선택 파일 분석’에서 변경할 수 있습니다.`, 'notice'));
-    } else body.append(el('p', '로컬에서 추출한 글입니다. OCR 오독과 표 순서가 원본과 다를 수 있습니다.', 'small'));
+    } else {
+      renderOcrReview(body, parsed, file);
+      body.append(el('p', '로컬에서 추출한 글입니다. OCR 오독과 표 순서가 원본과 다를 수 있습니다.', 'small'));
+    }
     if (!sources.length) body.append(el('p', '표시할 추출 내용이 없습니다.', 'empty'));
     for (const source of sources) {
       const section = el('section', undefined, `source${source.id === highlight ? ' highlight' : ''}`); section.id = `source-${source.id}`;

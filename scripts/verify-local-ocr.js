@@ -33,7 +33,13 @@ for (const [name, buffer, expected] of docs) {
   const filename = path.join(folder, name); await writeFile(filename, buffer); const started = Date.now();
   const result = await parseFile(filename, path.extname(name)); const text = result.sources.map(s => s.text).join('\n');
   for (const part of expected) assert.ok(text.includes(part), `${name}에서 ${part}을 찾지 못함: ${text}`);
-  report.push({ file: name, chars: result.chars, sources: result.sources.length, warnings: result.warnings, seconds: (Date.now() - started) / 1000 });
+  if (['.png', '.jpg', '.webp', '.pdf', '.docx'].includes(path.extname(name))) {
+    assert.ok(result.ocrPages.some(p => p.lines.length), `${name}의 OCR 글줄이 보존되지 않음`);
+    if (name.endsWith('.docx')) assert.ok(result.ocrPages.some(p => p.label.startsWith('삽입 그림')), '삽입 그림 OCR 위치 누락');
+  }
+  assert.equal(result.ocrReview.length, result.ocrPages.flatMap(p => p.lines).filter(l => l.dropped || !Number.isFinite(l.confidence) || l.confidence < 0.8 || l.confidence > 1).length);
+  report.push({ file: name, chars: result.chars, sources: result.sources.length, warnings: result.warnings,
+    ocrPages: result.ocrPages.length, reviewLines: result.ocrReview.length, seconds: (Date.now() - started) / 1000 });
   console.log(`${name}: 원문 값 확인 통과 (${report.at(-1).seconds}초)`);
 }
 await writeFile(path.join(folder, '가상자료.zip'), zip([...docs.map(([name, data]) => ({ name, data })), { name: '참고/지원안함.heic', data: 'synthetic unsupported file' }]));
