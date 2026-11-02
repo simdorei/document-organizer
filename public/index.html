@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>문서 정리함</title><link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header><div class="brand"><span class="mark">문</span><div><strong>문서 정리함</strong><small>자료를 읽고, 근거를 확인하고, 정리합니다</small></div></div>
+    <div class="header-actions"><span class="local">● 이 PC에서 실행 중</span><button id="settingsButton" class="quiet">API 설정</button></div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-title">내 작업 <span id="jobCount">0</span></div>
+      <button id="newButton" class="new-button">＋ 새 자료 넣기</button>
+      <nav id="jobs" aria-label="작업 목록"></nav>
+      <div class="sidebar-note">문서 읽기 · 로컬 OCR<br>내용 정리 · Claude API<br><span>원본과 결과는 이 PC에 보관됩니다.</span></div>
+    </aside>
+    <main>
+      <div id="message" role="status" hidden></div>
+      <section id="welcome">
+        <p class="eyebrow">DOCUMENT ORGANIZER</p><h1>쌓인 자료를,<br>확인할 수 있는 정보로.</h1>
+        <p class="intro">ZIP 안의 계약서·영수증·사진을 파일별로 읽고<br>날짜, 금액, 거래 관계를 원문과 함께 살펴보세요.</p>
+        <div class="upload-box">
+          <span class="upload-symbol">↥</span><h2>ZIP 또는 문서 하나를 선택하세요</h2>
+          <p>PDF · 한글 · Word · Excel · PowerPoint · PNG / JPG / WebP</p>
+          <button id="uploadButton" class="primary">내 PC에서 파일 선택</button>
+          <small>ZIP 200MB · 개별 파일 50MB · ZIP 안 파일 최대 300개</small>
+        </div>
+        <div class="steps"><div><b>01</b><strong>PC에서 읽기</strong><p>사진 속 글자도 로컬 OCR로 읽습니다.</p></div><div><b>02</b><strong>선택해서 분석</strong><p>확인한 글을 Claude API로 보냅니다.</p></div><div><b>03</b><strong>근거와 함께 정리</strong><p>원문을 대조하고 Excel로 저장합니다.</p></div></div>
+      </section>
+      <section id="workspace" hidden>
+        <div class="workspace-heading"><div><p class="eyebrow">자료 검토</p><h1 id="jobName"></h1><p id="jobMeta" class="muted"></p></div><button id="exportButton" class="quiet">Excel 내려받기 ↗</button></div>
+        <div id="jobError" class="notice danger" hidden></div>
+        <div class="analysis-bar"><div><strong id="selectionCount">분석할 파일을 선택하세요</strong><small>본문·표를 Claude로 전송합니다. API 이용료가 발생할 수 있습니다.</small></div><button id="analysisButton" class="primary">선택 파일 분석</button></div>
+        <div class="review-grid"><section class="file-panel"><div class="file-heading"><label><input id="selectAll" type="checkbox"> 분석 대상</label><span>파일별 읽기 상태</span></div><div id="files"></div></section>
+          <section class="detail-panel"><div id="emptyDetail" class="empty">파일을 선택하면 읽은 내용을 확인할 수 있습니다.</div>
+            <div id="detail" hidden><div class="detail-heading"><h2 id="fileName"></h2><a id="downloadOriginal" class="text-link">원본 다운로드</a></div>
+              <div id="fileWarnings"></div>
+              <div class="tabs" role="tablist" aria-label="문서 검토"><button data-tab="summary" role="tab">정리 결과</button><button data-tab="text" role="tab">추출된 글</button><button data-tab="original" role="tab">원본 보기</button><button data-tab="outgoing" role="tab">전송할 글</button></div>
+              <div id="detailBody"></div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  <input id="fileInput" type="file" accept=".zip,.hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp,.txt,.md,.csv" hidden>
+  <dialog id="settings"><form id="settingsForm"><div class="dialog-heading"><h2>Claude API 설정</h2><button type="button" class="close" data-close="settings" aria-label="닫기">×</button></div>
+    <p>Anthropic Console에서 발급한 API 키를 입력하세요. 키는 이 프로그램이 켜져 있는 동안만 기억하며 파일에 저장하지 않습니다.</p>
+    <p class="dialog-message notice danger" role="alert" hidden></p>
+    <label class="field">API 키<input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" required></label>
+    <p id="keyStatus" class="muted"></p><div class="dialog-actions"><button type="button" id="clearKey" class="quiet">기억한 키 지우기</button><button class="primary">키 적용</button></div>
+    <hr><h3>로컬 저장 및 OCR</h3><p id="ocrStatus"></p><p class="small" id="dataHome"></p>
+  </form></dialog>
+  <dialog id="analysisDialog"><form id="analysisForm"><div class="dialog-heading"><h2>자료 정리 설정</h2><button type="button" class="close" data-close="analysisDialog" aria-label="닫기">×</button></div>
+    <p class="dialog-message notice danger" role="alert" hidden></p>
+    <p id="analysisInfo"></p><label class="field">정리할 내용<textarea id="purpose" rows="5" maxlength="4000"></textarea></label>
+    <label class="field">Claude 모델<input id="model" type="text" spellcheck="false"></label>
+    <label class="check-row"><input id="masked" type="checkbox" checked> 주민등록번호·계좌번호 일부 가리기</label>
+    <p class="small">가림은 완전하지 않습니다. 이름·주소·거래금액 등은 남습니다. 파일별 ‘전송할 글’에서 본문을 확인하세요. 설정이 다른 실패 작업은 새 작업으로 올려 주세요.</p>
+    <div class="notice">원본 파일과 이미지는 보내지 않습니다. 추출된 글·표, 위치 표기, 정리 목적을 Anthropic Claude API로 전송합니다. 자동 요약과 OCR은 틀릴 수 있어 원본 대조가 필요합니다.</div>
+    <label class="check-row consent"><input id="consent" type="checkbox" required> 위 내용을 확인했고 선택한 자료의 전송에 동의합니다.</label>
+    <div class="dialog-actions"><button type="button" class="quiet" data-close="analysisDialog">돌아가기</button><button class="primary">Claude로 분석 시작</button></div>
+  </form></dialog>
+</body></html>

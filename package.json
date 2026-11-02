@@ -1,0 +1,23 @@
+{
+  "name": "document-organizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check.js",
+    "prepare:ocr": "node scripts/prepare-ocr.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0",
+    "@fastify/multipart": "10.1.6",
+    "exceljs": "4.4.0",
+    "fastify": "5.12.7",
+    "kordoc": "4.24.37",
+    "yauzl": "3.4.0"
+  }
+}

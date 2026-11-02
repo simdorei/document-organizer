@@ -1,0 +1,9 @@
+node_modules/
+.data/
+.secrets/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+test-artifacts/
