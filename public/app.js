@@ -28,29 +28,46 @@ function selection() {
 }
 async function refresh(force = false) {
   const previous = JSON.stringify(state.job), wasBusy = state.busy;
-  const data = await api('/api/jobs'); state.jobs = data.jobs; state.busy = Boolean(data.active || data.uploading);
-  const navStamp = JSON.stringify([state.job?.id, data.jobs.map(j => [j.id, j.name, j.files.length])]);
+  const data = await api('/api/jobs'); state.jobs = data.jobs; state.busy = Boolean(data.active || data.uploading || data.deleting);
+  const navStamp = JSON.stringify([state.job?.id, state.busy, data.jobs.map(j => [j.id, j.name, j.files.length])]);
   if (state.navStamp !== navStamp) {
     state.navStamp = navStamp; $('jobCount').textContent = data.jobs.length; $('jobs').replaceChildren();
     for (const job of data.jobs) {
-      const button = el('button', undefined, state.job?.id === job.id ? 'active' : '');
+      const entry = el('div', undefined, 'job-entry');
+      const button = el('button', undefined, `job-open${state.job?.id === job.id ? ' active' : ''}`);
       button.append(el('strong', job.name), el('small', `${new Date(job.createdAt).toLocaleDateString('ko-KR')} · ${job.files.length}개`));
-      button.onclick = run(() => selectJob(job.id)); $('jobs').append(button);
+      button.onclick = run(() => selectJob(job.id));
+      const remove = el('button', '삭제', 'job-delete'); remove.setAttribute('aria-label', `${job.name} 작업 삭제`); remove.disabled = state.busy;
+      remove.onclick = () => {
+        state.deleteJob = job; $('deleteJobName').textContent = job.name;
+        $('deleteJobInfo').textContent = `이 작업의 파일 ${job.files.length}개와 아래 보관 자료를 삭제합니다.`;
+        $('deleteDialog').querySelector('.dialog-message').hidden = true; $('deleteDialog').showModal();
+      };
+      entry.append(button, remove); $('jobs').append(entry);
     }
   }
   $('uploadButton').disabled = state.busy; $('newButton').disabled = state.busy;
   if (state.job) {
     state.job = data.jobs.find(j => j.id === state.job.id) || null;
-    if (state.job && (force || previous !== JSON.stringify(state.job) || wasBusy !== state.busy)) await renderJob();
+    if (!state.job) resetWorkspace();
+    else if (force || previous !== JSON.stringify(state.job) || wasBusy !== state.busy) await renderJob();
   }
+}
+function resetWorkspace() {
+  state.job = null; state.file = null; state.detail = null; state.detailStamp = ''; state.originalPage = null; state.selected.clear();
+  state.renderId = (state.renderId || 0) + 1; state.navStamp = '';
+  $('detailBody').replaceChildren(); $('fileWarnings').replaceChildren(); $('fileName').textContent = '';
+  $('detail').hidden = true; $('emptyDetail').hidden = false; $('welcome').hidden = false; $('workspace').hidden = true;
 }
 async function selectJob(id) {
   state.job = state.jobs.find(j => j.id === id); state.file = null; state.detail = null; state.detailStamp = ''; state.selected.clear();
+  if (!state.job) { resetWorkspace(); await refresh(); return; }
   for (const file of state.job.files) if (eligible(file)) state.selected.add(file.id);
   const options = state.job.analysisOptions || state.settings;
   $('purpose').value = options.purpose; $('model').value = options.model; $('masked').checked = options.masked !== false;
   $('welcome').hidden = true; $('workspace').hidden = false; notify('');
   await refresh(true);
+  if (!state.job) return;
   const first = state.job.files.find(f => ['ready', 'review'].includes(f.readStatus)) || state.job.files[0];
   if (first) await selectFile(first.id);
 }
@@ -84,7 +101,7 @@ async function selectFile(id) { state.file = id; state.originalPage = null; stat
 async function loadDetail() {
   const selected = state.file, jobId = state.job.id;
   const result = await api(fileUrl());
-  if (state.file !== selected || state.job.id !== jobId) return;
+  if (state.file !== selected || state.job?.id !== jobId) return;
   state.detail = result; $('emptyDetail').hidden = true; $('detail').hidden = false;
   $('fileName').textContent = result.file.name; $('downloadOriginal').hidden = !result.file.hasOriginal;
   $('downloadOriginal').href = originalUrl() + '&download=1';
@@ -174,7 +191,20 @@ async function renderDetail(highlight) {
 }
 for (const button of document.querySelectorAll('[data-tab]')) button.onclick = run(async () => { state.tab = button.dataset.tab; await renderDetail(); });
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
-$('newButton').onclick = () => { state.job = null; state.file = null; state.detail = null; $('welcome').hidden = false; $('workspace').hidden = true; notify(''); };
+$('newButton').onclick = () => { resetWorkspace(); notify(''); };
+$('deleteDialog').oncancel = event => { if ($('deleteConfirm').disabled) event.preventDefault(); };
+$('deleteDialog').onclose = () => { state.deleteJob = null; };
+$('deleteForm').onsubmit = run(async event => {
+  event.preventDefault();
+  const job = state.deleteJob; if (!job || $('deleteConfirm').disabled) return;
+  $('deleteConfirm').disabled = true; $('deleteCancel').disabled = true;
+  try {
+    await api(`/api/jobs/${job.id}`, { method: 'DELETE', body: { confirm: true } });
+    $('deleteDialog').close();
+    if (state.job?.id === job.id) resetWorkspace();
+    await refresh(true); notify(`‘${job.name}’ 작업과 앱에 보관한 자료를 삭제했습니다.`);
+  } finally { $('deleteConfirm').disabled = false; $('deleteCancel').disabled = false; }
+});
 $('uploadButton').onclick = () => $('fileInput').click();
 $('fileInput').onchange = run(async () => {
   const file = $('fileInput').files[0]; if (!file) return;

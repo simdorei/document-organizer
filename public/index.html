@@ -46,6 +46,13 @@
     </main>
   </div>
   <input id="fileInput" type="file" accept=".zip,.hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp,.txt,.md,.csv" hidden>
+  <dialog id="deleteDialog" aria-labelledby="deleteTitle"><form id="deleteForm">
+    <h2 id="deleteTitle">작업 삭제</h2><p><strong id="deleteJobName"></strong></p><p id="deleteJobInfo"></p>
+    <p class="dialog-message notice danger" role="alert" hidden></p>
+    <ul class="notes"><li>앱에 복사해 둔 ZIP·문서·이미지</li><li>OCR로 추출한 글과 분석 결과</li></ul>
+    <div class="notice">처음 선택한 PC 원본 파일과 이미 내려받은 Excel은 그대로 남습니다. 삭제한 작업은 이 앱에서 복구할 수 없습니다.</div>
+    <div class="dialog-actions"><button id="deleteCancel" type="button" class="quiet" data-close="deleteDialog" autofocus>취소</button><button id="deleteConfirm" class="destructive">작업과 보관 자료 삭제</button></div>
+  </form></dialog>
   <dialog id="settings"><form id="settingsForm"><div class="dialog-heading"><h2>Claude API 설정</h2><button type="button" class="close" data-close="settings" aria-label="닫기">×</button></div>
     <p>Anthropic Console에서 발급한 API 키를 입력하세요. 키는 이 프로그램이 켜져 있는 동안만 기억하며 파일에 저장하지 않습니다.</p>
     <p class="dialog-message notice danger" role="alert" hidden></p>

@@ -18,8 +18,12 @@ export async function buildApp({ store = new JobStore(), runner, clientFactory, 
   runner ||= new JobRunner(store);
   const app = Fastify({ logger: false, bodyLimit: 64_000 });
   const token = randomBytes(32).toString('hex');
-  let uploading = false;
-  const idle = () => { runner.assertIdle(); if (uploading) throw appError('파일을 넣는 중입니다. 잠시 기다려 주세요.', 409); };
+  let uploading = false, deleting = null;
+  const idle = () => {
+    runner.assertIdle();
+    if (uploading) throw appError('파일을 넣는 중입니다. 잠시 기다려 주세요.', 409);
+    if (deleting) throw appError('작업을 삭제하는 중입니다. 잠시 기다려 주세요.', 409);
+  };
   await app.register(multipart, { limits: { files: 1, fields: 0, parts: 1, fileSize: LIMITS.upload } });
   app.addHook('onRequest', async (request, reply) => {
     const host = request.headers.host || '';
@@ -59,8 +63,15 @@ export async function buildApp({ store = new JobStore(), runner, clientFactory, 
     else throw appError('Anthropic Console에서 발급한 sk-ant-로 시작하는 API 키를 입력해 주세요.');
     return { hasKey: Boolean(apiKey) };
   });
-  app.get('/api/jobs', async () => ({ jobs: store.list(), active: runner.active, uploading }));
+  app.get('/api/jobs', async () => ({ jobs: store.list(), active: runner.active, uploading, deleting }));
   app.get('/api/jobs/:id', async request => store.get(request.params.id));
+  app.delete('/api/jobs/:id', async request => {
+    idle();
+    if (request.body?.confirm !== true) throw appError('작업과 보관 자료의 삭제를 먼저 확인해 주세요.');
+    store.get(request.params.id); deleting = request.params.id;
+    try { await store.remove(deleting); return { deleted: true }; }
+    finally { deleting = null; }
+  });
   app.post('/api/jobs', async request => {
     idle(); uploading = true;
     let job, uploadPath;
@@ -126,7 +137,7 @@ export async function buildApp({ store = new JobStore(), runner, clientFactory, 
   });
   app.get('/api/jobs/:id/export', async (request, reply) => {
     const job = store.get(request.params.id);
-    if (runner.active === job.id) throw appError('작업이 끝난 뒤 내려받아 주세요.', 409);
+    if (runner.active === job.id || deleting === job.id) throw appError('작업이 끝난 뒤 내려받아 주세요.', 409);
     reply.header('Content-Disposition', `attachment; filename="document-summary-${job.id.slice(0, 8)}.xlsx"`);
     return reply.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(await exportWorkbook(job, store));
   });

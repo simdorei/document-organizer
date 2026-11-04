@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile, rename, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DATA_HOME, appError } from './config.js';
@@ -10,7 +10,17 @@ export class JobStore {
     await mkdir(path.join(this.home, 'jobs'), { recursive: true });
     for (const name of await readdir(path.join(this.home, 'jobs'))) {
       if (!/^[\da-f-]{36}$/.test(name)) continue;
-      const job = JSON.parse(await readFile(path.join(this.directory(name), 'job.json'), 'utf8'));
+      let job;
+      try { job = JSON.parse(await readFile(path.join(this.directory(name), 'job.json'), 'utf8')); }
+      catch (error) {
+        // The final deletion can leave an empty directory if the process stops.
+        if (error.code === 'ENOENT' && !(await readdir(this.directory(name))).length) continue;
+        throw error;
+      }
+      if (job.status === 'deleting') {
+        job.status = 'delete_failed'; job.error = '삭제 도중 프로그램이 종료됐습니다. 일부 보관 자료가 남아 있을 수 있으니 삭제를 다시 실행해 주세요.';
+        for (const file of job.files) { file.readStatus = 'failed'; file.error = job.error; }
+      }
       if (job.status === 'reading' || job.status === 'analyzing') {
         job.status = 'interrupted';
         job.error = '프로그램이 종료되어 처리가 중단되었습니다. 완료된 결과는 보존했습니다.';
@@ -52,6 +62,26 @@ export class JobStore {
   async readResult(job, file, type) {
     try { return JSON.parse(await readFile(path.join(this.directory(job.id), `${file.id}.${type}.json`), 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  }
+  async remove(id) {
+    const job = this.get(id);
+    const root = await realpath(path.join(this.home, 'jobs'));
+    const target = await realpath(this.directory(id));
+    if (path.dirname(target) !== root || path.basename(target) !== id) throw appError('작업 저장 폴더 밖의 자료는 삭제할 수 없습니다.', 409);
+    job.status = 'deleting'; await this.save(job);
+    try {
+      // Keep the manifest until the payload is gone, so interrupted deletion can be retried.
+      for (const entry of await readdir(target)) {
+        if (entry !== 'job.json') await rm(path.join(target, entry), { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      }
+      await rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+    } catch {
+      job.status = 'delete_failed'; job.error = '보관 자료를 모두 삭제하지 못했습니다. 일부는 이미 삭제됐을 수 있습니다. 원본 보기·다운로드 창을 닫고 삭제를 다시 실행해 주세요.';
+      for (const file of job.files) { file.readStatus = 'failed'; file.error = job.error; }
+      await this.save(job);
+      throw appError(job.error, 409);
+    }
+    this.jobs.delete(id);
   }
   list() { return [...this.jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
 }
